@@ -10,10 +10,14 @@ import logging
 import os
 import base64
 import hashlib
-from typing import Dict, Set, Optional, List, Any
+import warnings
+from typing import Dict, Set, Optional, List, Any, Union
 from datetime import datetime
 
 import websockets
+
+# Suppress deprecation warnings for websockets
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 # Import access control
 from auth import get_access_control, init_access_control, AccessControl
@@ -40,8 +44,8 @@ class Config:
 class ServerState:
     """Track connected clients and viewers"""
     def __init__(self):
-        self.viewers: Set[websockets.WebSocketServerProtocol] = set()
-        self.client: websockets.WebSocketServerProtocol = None
+        self.viewers: Set = set()
+        self.client = None
         self.client_id: str = None
         self.client_session: Optional[Any] = None
         self.viewer_sessions: Dict[str, Any] = {}
@@ -108,7 +112,7 @@ state = ServerState()
 access_control: Optional[AccessControl] = None
 
 
-async def handle_viewer(websocket: websockets.WebSocketServerProtocol, path: str):
+async def handle_viewer(websocket, path: str):
     """Handle web viewer connections"""
     viewer_id = f"viewer_{id(websocket)}"
     ip_address = get_ip_address(websocket)
@@ -271,7 +275,7 @@ async def handle_viewer(websocket: websockets.WebSocketServerProtocol, path: str
         ac.unregister_connection(viewer_id)
 
 
-async def handle_client(websocket: websockets.WebSocketServerProtocol, path: str):
+async def handle_client(websocket, path: str):
     """Handle Windows client (screen capture) connections"""
     client_id = f"client_{id(websocket)}"
     ip_address = get_ip_address(websocket)
@@ -435,7 +439,7 @@ async def handle_client(websocket: websockets.WebSocketServerProtocol, path: str
         ac.unregister_connection(client_id)
 
 
-def get_ip_address(websocket: websockets.WebSocketServerProtocol) -> str:
+def get_ip_address(websocket) -> str:
     """Extract IP address from WebSocket connection"""
     try:
         # Try to get from remote address
@@ -602,7 +606,7 @@ async def handle_api_request(path: str, reader: asyncio.StreamReader,
             ).encode('utf-8')
             writer.write(response)
             
-        elif path == '/api/users' and ac.config.get("authentication", {}).get("enabled", True):
+        elif path == '/api/users':
             # List users (admin only)
             # Check if request has valid auth
             auth_header = None
@@ -721,33 +725,38 @@ async def start_websocket_server():
     if ssl_context:
         server_kwargs['ssl'] = ssl_context
     
-    async with websockets.serve(
+    viewer_server = await websockets.serve(
         handle_viewer,
         Config.HOST,
         Config.PORT,
         **server_kwargs
-    ) as viewer_server, websockets.serve(
+    )
+    
+    client_server = await websockets.serve(
         handle_client,
         Config.HOST,
         Config.PORT + 1,  # Client connects on port+1
         **server_kwargs
-    ) as client_server:
+    )
         
-        # Create a simple HTTP server for the web interface
-        http_server = await asyncio.start_server(
-            handle_http,
-            Config.HOST,
-            Config.WEB_PORT
-        )
-        
-        logger.info(f"HTTP server running on http://{Config.HOST}:{Config.WEB_PORT}")
-        logger.info(f"Client server running on ws://{Config.HOST}:{Config.PORT + 1}")
-        
-        # Periodic cleanup
-        asyncio.create_task(cleanup_task())
-        
-        async with http_server:
-            await asyncio.Future()  # Run forever
+    # Create a simple HTTP server for the web interface
+    http_server = await asyncio.start_server(
+        handle_http,
+        Config.HOST,
+        Config.WEB_PORT
+    )
+    
+    logger.info(f"HTTP server running on http://{Config.HOST}:{Config.WEB_PORT}")
+    logger.info(f"Client server running on ws://{Config.HOST}:{Config.PORT + 1}")
+    
+    # Periodic cleanup
+    asyncio.create_task(cleanup_task())
+    
+    await asyncio.gather(
+        viewer_server.wait_closed,
+        client_server.wait_closed,
+        http_server.wait_closed
+    )
 
 
 async def cleanup_task():
