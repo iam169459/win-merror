@@ -1,6 +1,7 @@
 /**
  * Win-Merror Web Client
  * Handles WebSocket connection, video streaming, and control input
+ * with full authentication support
  */
 
 class ScreenControl {
@@ -10,6 +11,11 @@ class ScreenControl {
         this.reconnectAttempts = 0;
         this.maxReconnectAttempts = 10;
         this.reconnectDelay = 1000;
+        
+        // Authentication state
+        this.authenticated = false;
+        this.token = null;
+        this.permissions = [];
         
         // State
         this.connected = false;
@@ -37,9 +43,19 @@ class ScreenControl {
         this.videoOverlay = document.getElementById('videoOverlay');
         this.overlayMessage = document.getElementById('overlayMessage');
         
+        // Authentication elements
+        this.authModal = document.getElementById('authModal');
+        this.loginForm = document.getElementById('loginForm');
+        this.usernameInput = document.getElementById('username');
+        this.passwordInput = document.getElementById('password');
+        this.authMessage = document.getElementById('authMessage');
+        this.cancelLoginBtn = document.getElementById('cancelLogin');
+        this.logoutBtn = document.getElementById('logoutBtn');
+        
         // Status elements
         this.serverStatus = document.getElementById('serverStatus');
         this.clientStatus = document.getElementById('clientStatus');
+        this.authStatus = document.getElementById('authStatus');
         this.latencyValue = document.getElementById('latencyValue');
         this.websocketUrl = document.getElementById('websocketUrl');
         this.clientWsUrl = document.getElementById('clientWsUrl');
@@ -59,6 +75,7 @@ class ScreenControl {
         this.fullscreenCheckbox = document.getElementById('fullscreen');
         this.qualitySlider = document.getElementById('qualitySlider');
         this.qualityValue = document.getElementById('qualityValue');
+        this.controlPanel = document.getElementById('controlPanel');
         
         // Touch controls
         this.touchControls = document.getElementById('touchControls');
@@ -74,6 +91,7 @@ class ScreenControl {
     init() {
         this.setupEventListeners();
         this.updateStatus('Connecting...');
+        this.updateAuthStatus('Not authenticated');
         this.connect();
         this.updateUrlDisplay();
         
@@ -93,13 +111,21 @@ class ScreenControl {
     updateUrlDisplay() {
         const host = window.location.hostname;
         const port = window.location.port || (window.location.protocol === 'https:' ? 443 : 80);
-        const wsPort = parseInt(port) + 1;
+        const wsPort = parseInt(port) === 443 || parseInt(port) === 80 ? 
+                      (window.location.protocol === 'https:' ? 8443 : 8080) : parseInt(port);
         
-        this.websocketUrl.textContent = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${host}:${port}`;
+        this.websocketUrl.textContent = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${host}:${wsPort}`;
         this.clientWsUrl.textContent = `${host}:${wsPort + 1}`;
     }
     
     setupEventListeners() {
+        // Authentication
+        this.loginForm.addEventListener('submit', this.handleLogin.bind(this));
+        this.cancelLoginBtn.addEventListener('click', () => {
+            this.authModal.style.display = 'none';
+        });
+        this.logoutBtn.addEventListener('click', this.handleLogout.bind(this));
+        
         // Mouse controls on video
         this.videoDisplay.addEventListener('mousedown', this.handleMouseDown.bind(this));
         this.videoDisplay.addEventListener('mouseup', this.handleMouseUp.bind(this));
@@ -164,14 +190,94 @@ class ScreenControl {
         });
     }
     
+    handleLogin(e) {
+        e.preventDefault();
+        
+        const username = this.usernameInput.value;
+        const password = this.passwordInput.value;
+        
+        if (!username || !password) {
+            this.showAuthMessage('Please enter both username and password', 'error');
+            return;
+        }
+        
+        this.showAuthMessage('Authenticating...', 'info');
+        
+        // Send authentication request
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.ws.send(JSON.stringify({
+                type: 'authenticate',
+                username: username,
+                password: password
+            }));
+        } else {
+            this.showAuthMessage('Not connected to server', 'error');
+        }
+    }
+    
+    handleLogout() {
+        // Clear authentication state
+        this.authenticated = false;
+        this.token = null;
+        this.permissions = [];
+        this.updateAuthStatus('Not authenticated');
+        
+        // Disable controls
+        this.setControlsEnabled(false);
+        
+        // Send logout to server
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.ws.send(JSON.stringify({ type: 'logout' }));
+        }
+        
+        // Show login modal
+        this.authModal.style.display = 'block';
+        this.usernameInput.value = '';
+        this.passwordInput.value = '';
+        this.usernameInput.focus();
+    }
+    
+    showAuthMessage(message, type = 'info') {
+        this.authMessage.textContent = message;
+        this.authMessage.className = `auth-message ${type}`;
+    }
+    
+    updateAuthStatus(text, statusClass = '') {
+        this.authStatus.textContent = text;
+        this.authStatus.className = `status-value ${statusClass}`;
+    }
+    
+    setControlsEnabled(enabled) {
+        // Enable/disable control buttons
+        const controlButtons = [
+            this.leftClickBtn, this.rightClickBtn, this.doubleClickBtn,
+            this.scrollUpBtn, this.scrollDownBtn, this.sendTextBtn,
+            this.ctrlAltDelBtn, this.winKeyBtn, this.altTabBtn,
+            this.keyboardInput, this.showCursorCheckbox, this.fullscreenCheckbox,
+            this.qualitySlider, this.logoutBtn, this.touchLeftClick, this.touchRightClick
+        ];
+        
+        controlButtons.forEach(btn => {
+            if (btn) btn.disabled = !enabled;
+        });
+        
+        // Enable/disable video mouse control
+        if (enabled) {
+            this.videoDisplay.style.cursor = 'crosshair';
+        } else {
+            this.videoDisplay.style.cursor = 'not-allowed';
+        }
+    }
+    
     connect() {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const host = window.location.hostname;
         const port = window.location.port || (protocol === 'wss:' ? 443 : 80);
         
         // Try to connect to the WebSocket server
-        // The server runs on the same host, port 8080 (or 8081 for HTTPS)
-        const wsUrl = `${protocol}//${host}:${parseInt(port) === 443 || parseInt(port) === 80 ? (protocol === 'wss:' ? 8443 : 8080) : parseInt(port)}`;
+        const wsPort = parseInt(port) === 443 || parseInt(port) === 80 ? 
+                      (protocol === 'wss:' ? 8443 : 8080) : parseInt(port);
+        const wsUrl = `${protocol}//${host}:${wsPort}`;
         
         console.log(`Connecting to WebSocket: ${wsUrl}`);
         
@@ -198,9 +304,14 @@ class ScreenControl {
             this.ws.onclose = () => {
                 this.connected = false;
                 this.clientConnected = false;
+                this.authenticated = false;
+                this.token = null;
+                this.permissions = [];
                 this.updateStatus('Disconnected', 'disconnected');
+                this.updateAuthStatus('Not authenticated');
                 this.videoOverlay.classList.add('visible');
                 this.overlayMessage.textContent = 'Disconnected from server';
+                this.setControlsEnabled(false);
                 
                 // Attempt to reconnect
                 this.scheduleReconnect();
@@ -247,15 +358,58 @@ class ScreenControl {
             const type = message.type;
             
             switch (type) {
+                case 'auth_required':
+                    // Show login modal
+                    this.authModal.style.display = 'block';
+                    this.usernameInput.focus();
+                    this.showAuthMessage(message.message || 'Please login to continue', 'info');
+                    this.updateAuthStatus('Authentication required');
+                    break;
+                    
+                case 'auth_success':
+                    this.authenticated = true;
+                    this.token = message.token || this.token;
+                    this.permissions = message.permissions || [];
+                    this.clientConnected = message.client_connected || false;
+                    this.updateAuthStatus('Authenticated', 'connected');
+                    this.authModal.style.display = 'none';
+                    
+                    // Enable controls based on permissions
+                    const hasControl = this.permissions.includes('control') || 
+                                      this.permissions.includes('admin');
+                    this.setControlsEnabled(hasControl);
+                    
+                    if (message.client_connected) {
+                        this.videoOverlay.classList.remove('visible');
+                    } else {
+                        this.videoOverlay.classList.add('visible');
+                        this.overlayMessage.textContent = 'Waiting for screen...';
+                    }
+                    break;
+                    
+                case 'auth_failed':
+                    this.authenticated = false;
+                    this.token = null;
+                    this.permissions = [];
+                    this.showAuthMessage(message.message || 'Authentication failed', 'error');
+                    this.updateAuthStatus('Authentication failed', 'disconnected');
+                    this.setControlsEnabled(false);
+                    break;
+                    
                 case 'connected':
                     this.clientConnected = true;
                     this.updateClientStatus('Connected', 'connected');
+                    if (this.authenticated) {
+                        this.videoOverlay.classList.remove('visible');
+                    }
                     break;
                     
                 case 'client_connected':
                     this.clientConnected = true;
                     this.updateClientStatus('Connected', 'connected');
-                    this.videoOverlay.classList.remove('visible');
+                    if (this.authenticated) {
+                        this.videoOverlay.classList.remove('visible');
+                    }
                     break;
                     
                 case 'client_disconnected':
@@ -277,6 +431,11 @@ class ScreenControl {
                     
                 case 'pong':
                     this.handlePong();
+                    break;
+                    
+                case 'error':
+                    console.error('Server error:', message.message);
+                    this.showAuthMessage(message.message || 'Error occurred', 'error');
                     break;
                     
                 default:
@@ -341,7 +500,7 @@ class ScreenControl {
     
     // Mouse Event Handlers
     handleMouseDown(e) {
-        if (!this.clientConnected) return;
+        if (!this.clientConnected || !this.authenticated) return;
         
         this.isMouseDown = true;
         
@@ -380,7 +539,7 @@ class ScreenControl {
     }
     
     handleMouseMove(e) {
-        if (!this.clientConnected) return;
+        if (!this.clientConnected || !this.authenticated) return;
         
         // Calculate position relative to video
         const rect = this.videoDisplay.getBoundingClientRect();
@@ -406,7 +565,7 @@ class ScreenControl {
     }
     
     handleMouseWheel(e) {
-        if (!this.clientConnected) return;
+        if (!this.clientConnected || !this.authenticated) return;
         
         // Prevent page scroll
         e.preventDefault();
@@ -417,7 +576,7 @@ class ScreenControl {
     }
     
     handleDoubleClick(e) {
-        if (!this.clientConnected) return;
+        if (!this.clientConnected || !this.authenticated) return;
         
         // Calculate position
         const rect = this.videoDisplay.getBoundingClientRect();
@@ -450,20 +609,20 @@ class ScreenControl {
     }
     
     sendMouseClick(button) {
-        if (!this.clientConnected) return;
+        if (!this.clientConnected || !this.authenticated) return;
         
         // Use the last known position
         this.sendMouseEvent('click', this.lastMouseX, this.lastMouseY, button);
     }
     
     sendDoubleClick() {
-        if (!this.clientConnected) return;
+        if (!this.clientConnected || !this.authenticated) return;
         
         this.sendMouseEvent('double_click', this.lastMouseX, this.lastMouseY, 0);
     }
     
     sendScroll(delta) {
-        if (!this.clientConnected) return;
+        if (!this.clientConnected || !this.authenticated) return;
         
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
             this.ws.send(JSON.stringify({
@@ -478,7 +637,7 @@ class ScreenControl {
     
     // Touch Event Handlers
     handleTouchStart(e) {
-        if (!this.clientConnected) return;
+        if (!this.clientConnected || !this.authenticated) return;
         
         this.touchActive = true;
         const touch = e.touches[0];
@@ -565,7 +724,7 @@ class ScreenControl {
     // Keyboard Handlers
     sendText() {
         const text = this.keyboardInput.value;
-        if (!text || !this.clientConnected) return;
+        if (!text || !this.clientConnected || !this.authenticated) return;
         
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
             this.ws.send(JSON.stringify({
@@ -583,7 +742,7 @@ class ScreenControl {
     }
     
     sendShortcut(shortcut) {
-        if (!this.clientConnected) return;
+        if (!this.clientConnected || !this.authenticated) return;
         
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
             this.ws.send(JSON.stringify({
@@ -621,14 +780,14 @@ class ScreenControl {
             'Meta': 'win' // Windows/Command key
         };
         
-        if (e.key in specialKeys && this.clientConnected) {
+        if (specialKeys[e.key] && this.clientConnected && this.authenticated) {
             this.sendKeyPress(specialKeys[e.key], e.ctrlKey, e.altKey, e.shiftKey, e.metaKey);
             e.preventDefault();
         }
     }
     
     sendKeyPress(key, ctrl = false, alt = false, shift = false, meta = false) {
-        if (!this.clientConnected) return;
+        if (!this.clientConnected || !this.authenticated) return;
         
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
             this.ws.send(JSON.stringify({

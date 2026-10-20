@@ -611,3 +611,132 @@ body.fullscreen .video-display {
 ::-webkit-scrollbar-thumb:hover {
     background: var(--secondary-color);
 }
+
+/* Authentication Modal Styles */
+.modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.8);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+}
+
+.modal.active {
+    display: flex;
+}
+
+.modal-content {
+    background: var(--card-bg);
+    border-radius: var(--radius);
+    padding: 30px;
+    width: 90%;
+    max-width: 400px;
+    border: 1px solid var(--border-color);
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+}
+
+.modal-content h2 {
+    font-size: 1.5rem;
+    color: var(--text-color);
+    margin-bottom: 20px;
+    text-align: center;
+}
+
+.form-group {
+    margin-bottom: 20px;
+}
+
+.form-group label {
+    display: block;
+    font-size: 0.9rem;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+}
+
+.form-group input {
+    width: 100%;
+    padding: 12px 15px;
+    background: var(--bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    color: var(--text-color);
+    font-size: 1rem;
+}
+
+.form-group input:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+}
+
+.form-group input::placeholder {
+    color: var(--text-muted);
+}
+
+.form-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 20px;
+}
+
+.login-btn {
+    flex: 1;
+    background: var(--success-color);
+}
+
+.login-btn:hover {
+    background: #16a34a;
+}
+
+.cancel-btn {
+    background: var(--secondary-color);
+}
+
+.cancel-btn:hover {
+    background: #475569;
+}
+
+.auth-message {
+    margin-top: 15px;
+    padding: 10px;
+    border-radius: var(--radius);
+    font-size: 0.9rem;
+    text-align: center;
+}
+
+.auth-message.info {
+    color: var(--text-muted);
+}
+
+.auth-message.error {
+    color: var(--danger-color);
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid var(--danger-color);
+}
+
+.auth-message.success {
+    color: var(--success-color);
+    background: rgba(34, 197, 94, 0.1);
+    border: 1px solid var(--success-color);
+}
+
+/* Logout button */
+.logout-btn {
+    background: var(--danger-color);
+    width: 100%;
+}
+
+.logout-btn:hover {
+    background: #dc2626;
+}
+
+/* User actions section */
+.user-actions {
+    display: flex;
+    gap: 10px;
+}

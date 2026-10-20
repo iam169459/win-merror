@@ -321,6 +321,10 @@ class ClientApp:
         self.websocket: Optional[websockets.WebSocketClientProtocol] = None
         self.running = False
         self.client_id: Optional[str] = None
+        self.authenticated = False
+        self.username: Optional[str] = None
+        self.password: Optional[str] = None
+        self.token: Optional[str] = None
         
     async def connect(self, host: str = None, port: int = None):
         """Connect to the WebSocket server"""
@@ -337,12 +341,27 @@ class ClientApp:
                 ping_timeout=60
             )
             
+            # Check if authentication is required
+            # Send auth if we have credentials
+            if self.username and self.password:
+                await self.send_message({
+                    'type': 'authenticate',
+                    'username': self.username,
+                    'password': self.password
+                })
+            elif self.token:
+                await self.send_message({
+                    'type': 'authenticate',
+                    'token': self.token
+                })
+            
             # Get connection info
             message = await self.websocket.recv()
             data = json.loads(message)
             
             if data.get('type') == 'connected':
                 self.client_id = data.get('client_id')
+                self.authenticated = True
                 logger.info(f"Connected to server with client ID: {self.client_id}")
                 
                 # Send screen info
@@ -355,6 +374,27 @@ class ClientApp:
                 })
                 
                 return True
+            elif data.get('type') == 'auth_success':
+                self.authenticated = True
+                self.client_id = data.get('client_id')
+                logger.info(f"Authenticated and connected with client ID: {self.client_id}")
+                
+                # Send screen info
+                width = win32api.GetSystemMetrics(win32con.SM_CXSCREEN)
+                height = win32api.GetSystemMetrics(win32con.SM_CYSCREEN)
+                await self.send_message({
+                    'type': 'screen_info',
+                    'width': width,
+                    'height': height
+                })
+                
+                return True
+            elif data.get('type') == 'auth_required':
+                logger.error("Authentication required but no credentials provided")
+                return False
+            elif data.get('type') == 'auth_failed':
+                logger.error(f"Authentication failed: {data.get('message', 'Unknown error')}")
+                return False
             else:
                 logger.error(f"Connection failed: {data.get('message', 'Unknown error')}")
                 return False
@@ -465,7 +505,32 @@ class ClientApp:
                     data = json.loads(message)
                     msg_type = data.get('type')
                     
-                    if msg_type == 'control':
+                    if msg_type == 'auth_required':
+                        # Server requires authentication
+                        if self.username and self.password:
+                            await self.send_message({
+                                'type': 'authenticate',
+                                'username': self.username,
+                                'password': self.password
+                            })
+                        elif self.token:
+                            await self.send_message({
+                                'type': 'authenticate',
+                                'token': self.token
+                            })
+                        else:
+                            logger.error("Authentication required but no credentials provided")
+                            await self.disconnect()
+                            
+                    elif msg_type == 'auth_success':
+                        self.authenticated = True
+                        logger.info("Authentication successful")
+                        
+                    elif msg_type == 'auth_failed':
+                        logger.error(f"Authentication failed: {data.get('message', 'Unknown')}")
+                        await self.disconnect()
+                        
+                    elif msg_type == 'control':
                         await self.handle_control_message(data)
                         
                     elif msg_type == 'settings':
@@ -485,9 +550,11 @@ class ClientApp:
         except websockets.ConnectionClosed:
             logger.info("Connection closed by server")
             self.websocket = None
+            self.authenticated = False
         except Exception as e:
             logger.error(f"Error in message processing: {e}")
             self.websocket = None
+            self.authenticated = False
     
     async def capture_loop(self):
         """Main loop for capturing and sending frames"""
@@ -553,6 +620,12 @@ def main():
                         help='JPEG quality (0-100, default: 85)')
     parser.add_argument('--scale', type=float, default=1.0,
                         help='Screen capture scale factor (default: 1.0)')
+    parser.add_argument('--username', type=str, default=None,
+                        help='Username for authentication')
+    parser.add_argument('--password', type=str, default=None,
+                        help='Password for authentication')
+    parser.add_argument('--token', type=str, default=None,
+                        help='Authentication token')
     
     args = parser.parse_args()
     
@@ -562,6 +635,11 @@ def main():
     Config.FRAME_INTERVAL = 1.0 / args.fps
     Config.JPEG_QUALITY = args.quality
     Config.SCREENSHOT_SCALE = args.scale
+    
+    # Set authentication credentials
+    app.username = args.username
+    app.password = args.password
+    app.token = args.token
     
     # Print configuration
     logger.info("=" * 60)
