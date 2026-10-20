@@ -1,16 +1,19 @@
 """
 Win-Merror Client
 Windows screen capture and control client
+with auto-connect functionality
 """
 
 import asyncio
 import json
 import logging
+import os
 import sys
 import time
 import base64
 import io
 from typing import Optional
+from pathlib import Path
 
 import websockets
 import numpy as np
@@ -28,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 
 class Config:
-    """Client configuration"""
+    """Client configuration - can be overridden by config.json"""
     SERVER_HOST = "localhost"
     SERVER_PORT = 8081  # WebSocket port for client connection
     FRAME_INTERVAL = 0.05  # ~20 FPS (1/20 = 0.05)
@@ -36,6 +39,49 @@ class Config:
     SCREENSHOT_SCALE = 1.0  # Scale factor (0.5 = 50% size)
     SHOW_CURSOR = True
     MOUSE_MOVE_THRESHOLD = 5  # Minimum mouse movement to send
+    
+    # Auto-connect settings
+    AUTO_RECONNECT = True
+    RECONNECT_DELAY = 5  # seconds
+    MAX_RECONNECT_ATTEMPTS = 10
+    
+    @classmethod
+    def load_from_file(cls, config_path: str = None):
+        """Load configuration from JSON file"""
+        if config_path is None:
+            # Try to find config.json in current directory or client directory
+            config_path = os.path.join(os.path.dirname(__file__), 'config.json')
+            if not os.path.exists(config_path):
+                config_path = 'config.json'
+        
+        if os.path.exists(config_path):
+            try:
+                with open(config_path, 'r') as f:
+                    config = json.load(f)
+                
+                # Update Config from loaded values
+                connection = config.get('connection', {})
+                cls.SERVER_HOST = connection.get('host', cls.SERVER_HOST)
+                cls.SERVER_PORT = connection.get('port', cls.SERVER_PORT)
+                cls.FRAME_INTERVAL = 1.0 / connection.get('fps', 20)
+                cls.JPEG_QUALITY = connection.get('quality', cls.JPEG_QUALITY)
+                cls.SCREENSHOT_SCALE = connection.get('scale', cls.SCREENSHOT_SCALE)
+                
+                # Auto-connect settings
+                cls.AUTO_RECONNECT = connection.get('auto_reconnect', cls.AUTO_RECONNECT)
+                cls.RECONNECT_DELAY = connection.get('reconnect_delay', cls.RECONNECT_DELAY)
+                cls.MAX_RECONNECT_ATTEMPTS = connection.get('max_reconnect_attempts', cls.MAX_RECONNECT_ATTEMPTS)
+                
+                # Video settings
+                video = config.get('video', {})
+                cls.SHOW_CURSOR = video.get('show_cursor', cls.SHOW_CURSOR)
+                
+                logger.info(f"Configuration loaded from {config_path}")
+                return config
+            except Exception as e:
+                logger.warning(f"Failed to load config from {config_path}: {e}")
+        
+        return {}
 
 
 class ScreenCapture:
@@ -312,7 +358,7 @@ class KeyboardController:
 
 
 class ClientApp:
-    """Main client application"""
+    """Main client application with auto-connect"""
     
     def __init__(self):
         self.screen_capture = ScreenCapture()
@@ -325,6 +371,10 @@ class ClientApp:
         self.username: Optional[str] = None
         self.password: Optional[str] = None
         self.token: Optional[str] = None
+        self.reconnect_attempts = 0
+        self.max_reconnect_attempts = Config.MAX_RECONNECT_ATTEMPTS
+        self.config = {}  # Loaded configuration
+        self.config_path = os.path.join(os.path.dirname(__file__), 'config.json')
         
     async def connect(self, host: str = None, port: int = None):
         """Connect to the WebSocket server"""
@@ -362,6 +412,7 @@ class ClientApp:
             if data.get('type') == 'connected':
                 self.client_id = data.get('client_id')
                 self.authenticated = True
+                self.reconnect_attempts = 0  # Reset on successful connection
                 logger.info(f"Connected to server with client ID: {self.client_id}")
                 
                 # Send screen info
@@ -377,7 +428,12 @@ class ClientApp:
             elif data.get('type') == 'auth_success':
                 self.authenticated = True
                 self.client_id = data.get('client_id')
+                self.reconnect_attempts = 0  # Reset on successful connection
                 logger.info(f"Authenticated and connected with client ID: {self.client_id}")
+                
+                # Save token if configured
+                if self.config.get('authentication', {}).get('save_token', False) and data.get('token'):
+                    self.save_token(data.get('token'))
                 
                 # Send screen info
                 width = win32api.GetSystemMetrics(win32con.SM_CXSCREEN)
@@ -402,6 +458,64 @@ class ClientApp:
         except Exception as e:
             logger.error(f"Connection error: {e}")
             return False
+    
+    def save_token(self, token: str):
+        """Save authentication token to config file"""
+        try:
+            if os.path.exists(self.config_path):
+                with open(self.config_path, 'r') as f:
+                    config = json.load(f)
+            else:
+                config = {}
+            
+            if 'authentication' not in config:
+                config['authentication'] = {}
+            
+            config['authentication']['token'] = token
+            
+            with open(self.config_path, 'w') as f:
+                json.dump(config, f, indent=2)
+            
+            logger.info("Authentication token saved to config")
+        except Exception as e:
+            logger.error(f"Failed to save token: {e}")
+    
+    async def disconnect(self):
+        """Disconnect from the server"""
+        if self.websocket:
+            try:
+                await self.websocket.close()
+            except Exception as e:
+                logger.warning(f"Error closing websocket: {e}")
+            finally:
+                self.websocket = None
+                self.authenticated = False
+        self.client_id = None
+    
+    async def auto_reconnect(self):
+        """Automatically reconnect if connection is lost"""
+        while Config.AUTO_RECONNECT and self.running:
+            if self.websocket is None or self.websocket.closed:
+                delay = Config.RECONNECT_DELAY
+                self.reconnect_attempts += 1
+                
+                if self.reconnect_attempts > self.max_reconnect_attempts:
+                    logger.error(f"Max reconnect attempts ({self.max_reconnect_attempts}) reached")
+                    break
+                
+                logger.info(f"Attempting to reconnect ({self.reconnect_attempts}/{self.max_reconnect_attempts})...")
+                await asyncio.sleep(delay)
+                
+                try:
+                    success = await self.connect()
+                    if success:
+                        logger.info("Reconnected successfully!")
+                        self.reconnect_attempts = 0
+                        return
+                except Exception as e:
+                    logger.error(f"Reconnection attempt failed: {e}")
+            else:
+                await asyncio.sleep(1)
     
     async def disconnect(self):
         """Disconnect from the server"""
@@ -569,18 +683,24 @@ class ClientApp:
             await asyncio.sleep(sleep_time)
     
     async def run(self, host: str = None, port: int = None):
-        """Run the client application"""
+        """Run the client application with auto-connect"""
         self.running = True
         
         # Connect to server
         if not await self.connect(host, port):
             logger.error("Failed to connect to server")
+            if Config.AUTO_RECONNECT:
+                logger.info("Will attempt to auto-reconnect...")
+                await self.auto_reconnect()
             return
         
         logger.info("Starting screen capture...")
         
         # Start message processing in background
         message_task = asyncio.create_task(self.process_messages())
+        
+        # Start auto-reconnect task in background
+        reconnect_task = asyncio.create_task(self.auto_reconnect())
         
         # Start capture loop
         try:
@@ -592,9 +712,15 @@ class ClientApp:
         finally:
             self.running = False
             message_task.cancel()
+            reconnect_task.cancel()
             
             try:
                 await message_task
+            except asyncio.CancelledError:
+                pass
+            
+            try:
+                await reconnect_task
             except asyncio.CancelledError:
                 pass
             
@@ -609,23 +735,28 @@ def main():
     """Main entry point"""
     import argparse
     
+    # Load configuration from file first
+    Config.load_from_file()
+    
     parser = argparse.ArgumentParser(description='Win-Merror Client - Windows Screen Mirroring')
     parser.add_argument('--host', type=str, default=Config.SERVER_HOST,
-                        help='Server host (default: localhost)')
+                        help='Server host (default: from config.json or localhost)')
     parser.add_argument('--port', type=int, default=Config.SERVER_PORT,
-                        help='Server port (default: 8081)')
-    parser.add_argument('--fps', type=int, default=20,
-                        help='Target frames per second (default: 20)')
-    parser.add_argument('--quality', type=int, default=85,
-                        help='JPEG quality (0-100, default: 85)')
-    parser.add_argument('--scale', type=float, default=1.0,
-                        help='Screen capture scale factor (default: 1.0)')
+                        help='Server port (default: from config.json or 8081)')
+    parser.add_argument('--fps', type=int, default=int(1/Config.FRAME_INTERVAL),
+                        help='Target frames per second (default: from config.json or 20)')
+    parser.add_argument('--quality', type=int, default=Config.JPEG_QUALITY,
+                        help='JPEG quality (0-100, default: from config.json or 85)')
+    parser.add_argument('--scale', type=float, default=Config.SCREENSHOT_SCALE,
+                        help='Screen capture scale factor (default: from config.json or 1.0)')
     parser.add_argument('--username', type=str, default=None,
-                        help='Username for authentication')
+                        help='Username for authentication (default: from config.json)')
     parser.add_argument('--password', type=str, default=None,
-                        help='Password for authentication')
+                        help='Password for authentication (default: from config.json)')
     parser.add_argument('--token', type=str, default=None,
-                        help='Authentication token')
+                        help='Authentication token (default: from config.json)')
+    parser.add_argument('--no-auto-reconnect', action='store_true',
+                        help='Disable auto-reconnect on connection loss')
     
     args = parser.parse_args()
     
@@ -635,11 +766,38 @@ def main():
     Config.FRAME_INTERVAL = 1.0 / args.fps
     Config.JPEG_QUALITY = args.quality
     Config.SCREENSHOT_SCALE = args.scale
+    Config.AUTO_RECONNECT = not args.no_auto_reconnect
     
-    # Set authentication credentials
-    app.username = args.username
-    app.password = args.password
-    app.token = args.token
+    # Create app instance
+    app = ClientApp()
+    
+    # Try to load credentials from config file if not provided via command line
+    if not args.username and not args.password and not args.token:
+        try:
+            config_path = os.path.join(os.path.dirname(__file__), 'config.json')
+            if os.path.exists(config_path):
+                with open(config_path, 'r') as f:
+                    config = json.load(f)
+                auth = config.get('authentication', {})
+                app.username = auth.get('username') or app.username
+                app.password = auth.get('password') or app.password
+                app.token = auth.get('token') or app.token
+        except Exception as e:
+            logger.warning(f"Failed to load credentials from config: {e}")
+    else:
+        # Use command line credentials
+        app.username = args.username
+        app.password = args.password
+        app.token = args.token
+    
+    # Load full config for token saving
+    try:
+        config_path = os.path.join(os.path.dirname(__file__), 'config.json')
+        if os.path.exists(config_path):
+            with open(config_path, 'r') as f:
+                app.config = json.load(f)
+    except Exception:
+        app.config = {}
     
     # Print configuration
     logger.info("=" * 60)

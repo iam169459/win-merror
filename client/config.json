@@ -1,0 +1,26 @@
+{
+    "connection": {
+        "host": "localhost",
+        "port": 8081,
+        "fps": 20,
+        "quality": 85,
+        "scale": 1.0,
+        "auto_reconnect": true,
+        "reconnect_delay": 5,
+        "max_reconnect_attempts": 10
+    },
+    "authentication": {
+        "username": "admin",
+        "password": "admin123",
+        "token": null,
+        "save_token": true
+    },
+    "video": {
+        "capture_method": "fullscreen",
+        "show_cursor": true
+    },
+    "logging": {
+        "level": "INFO",
+        "file": "client.log"
+    }
+}
