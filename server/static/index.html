@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Win-Merror - Screen Control</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Win-Merror</h1>
+            <p class="subtitle">Windows Screen Mirroring & Control</p>
+        </header>
+
+        <main>
+            <!-- Connection Status -->
+            <div class="status-bar" id="statusBar">
+                <div class="status-item">
+                    <span class="status-label">Server:</span>
+                    <span class="status-value" id="serverStatus">Connecting...</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Client:</span>
+                    <span class="status-value" id="clientStatus">Disconnected</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Latency:</span>
+                    <span class="status-value" id="latencyValue">- ms</span>
+                </div>
+            </div>
+
+            <!-- Video Display -->
+            <div class="video-container">
+                <div class="video-wrapper">
+                    <img id="videoDisplay" class="video-display" alt="Screen Mirroring">
+                    <div class="video-overlay" id="videoOverlay">
+                        <div class="overlay-message" id="overlayMessage">
+                            Connecting to server...
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Control Panel -->
+            <div class="control-panel">
+                <div class="control-section">
+                    <h3>Mouse Control</h3>
+                    <div class="mouse-controls">
+                        <div class="mouse-buttons">
+                            <button class="control-btn" id="leftClick" title="Left Click">
+                                <span>Left Click</span>
+                            </button>
+                            <button class="control-btn" id="rightClick" title="Right Click">
+                                <span>Right Click</span>
+                            </button>
+                            <button class="control-btn" id="doubleClick" title="Double Click">
+                                <span>Double Click</span>
+                            </button>
+                        </div>
+                        <div class="mouse-scroll">
+                            <button class="control-btn scroll-btn" id="scrollUp" title="Scroll Up">
+                                <span>&#9650;</span>
+                            </button>
+                            <button class="control-btn scroll-btn" id="scrollDown" title="Scroll Down">
+                                <span>&#9660;</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="control-section">
+                    <h3>Keyboard Control</h3>
+                    <div class="keyboard-input">
+                        <input type="text" id="keyboardInput" 
+                               placeholder="Type here and press Enter to send...">
+                        <button class="control-btn send-btn" id="sendText">Send Text</button>
+                    </div>
+                    <div class="keyboard-shortcuts">
+                        <button class="control-btn shortcut-btn" id="ctrlAltDel" title="Ctrl+Alt+Del">
+                            <span>Ctrl+Alt+Del</span>
+                        </button>
+                        <button class="control-btn shortcut-btn" id="winKey" title="Windows Key">
+                            <span>Win</span>
+                        </button>
+                        <button class="control-btn shortcut-btn" id="altTab" title="Alt+Tab">
+                            <span>Alt+Tab</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="control-section">
+                    <h3>View Options</h3>
+                    <div class="view-options">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="showCursor" checked>
+                            <span>Show Mouse Cursor</span>
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="fullscreen" >
+                            <span>Fullscreen</span>
+                        </label>
+                        <div class="quality-slider">
+                            <label for="qualitySlider">Quality: <span id="qualityValue">80%</span></label>
+                            <input type="range" id="qualitySlider" min="30" max="100" value="80">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Connection Info -->
+            <div class="connection-info">
+                <p>WebSocket: <span id="websocketUrl"></span></p>
+                <p>To connect from another device, use this URL on the Windows machine:</p>
+                <p class="connection-url">
+                    Client: ws://<span id="clientWsUrl"></span>
+                </p>
+            </div>
+        </main>
+
+        <footer>
+            <p>Win-Merror - Windows Screen Mirroring with Web Control</p>
+        </footer>
+    </div>
+
+    <!-- Touch Controls (for mobile) -->
+    <div class="touch-controls" id="touchControls">
+        <div class="touch-pad" id="touchPad">
+            <div class="touch-indicator" id="touchIndicator"></div>
+        </div>
+        <div class="touch-buttons">
+            <button class="touch-btn" id="touchLeftClick">Tap</button>
+            <button class="touch-btn" id="touchRightClick">Menu</button>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
