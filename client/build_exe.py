@@ -15,7 +15,6 @@ Requirements:
 import os
 import sys
 import subprocess
-import shutil
 from pathlib import Path
 
 
@@ -56,12 +55,15 @@ def install_dependencies():
         result = subprocess.run([sys.executable, "-m", "pip", "install", "-r", str(req_file)], 
                               capture_output=True, text=True)
         if result.returncode != 0:
-            print("Error: Failed to install dependencies")
+            print("Warning: Failed to install some dependencies")
             print(result.stderr)
-            sys.exit(1)
-        print("Dependencies installed successfully")
     else:
-        print(f"Warning: {req_file} not found, skipping dependency installation")
+        print("requirements-client.txt not found, installing basic dependencies...")
+        result = subprocess.run([sys.executable, "-m", "pip", "install", "websockets", "Pillow", "pywin32"], 
+                              capture_output=True, text=True)
+        if result.returncode != 0:
+            print("Warning: Failed to install dependencies")
+            print(result.stderr)
 
 
 def create_icon():
@@ -69,10 +71,8 @@ def create_icon():
     icon_path = Path(__file__).parent / "icon.ico"
     if not icon_path.exists():
         print("Creating default icon...")
-        # Create a simple blank icon
-        from PIL import Image, ImageDraw
         try:
-            # Create a 256x256 icon
+            from PIL import Image, ImageDraw
             img = Image.new('RGBA', (256, 256), (0, 0, 0, 0))
             draw = ImageDraw.Draw(img)
             
@@ -81,15 +81,14 @@ def create_icon():
             draw.ellipse([70, 70, 180, 180], fill=(255, 255, 255, 255))
             draw.ellipse([80, 80, 100, 100], fill=(0, 0, 0, 255))
             draw.ellipse([150, 80, 170, 100], fill=(0, 0, 0, 255))
-            draw.ellipse([90, 150, 110, 170], fill=(0, 0, 0, 255))
-            draw.ellipse([140, 150, 160, 170], fill=(0, 0, 0, 255))
             
             img.save(icon_path, format='ICO', sizes=[(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
             print(f"Icon created at {icon_path}")
         except ImportError:
-            print("Warning: PIL/Pillow not available, using no icon")
+            print("PIL/Pillow not available, skipping icon creation")
         except Exception as e:
             print(f"Warning: Failed to create icon: {e}")
+            print("Will build without custom icon")
     else:
         print(f"Icon found at {icon_path}")
 
@@ -109,7 +108,7 @@ def build_exe():
     cmd = [
         sys.executable, "-m", "pyinstaller",
         "--onefile",           # Single executable file
-        "--windowed",          # No console window (use --console for debugging)
+        "--windowed",          # No console window
         "--name", "win-merror-client",
         "--clean",             # Clean PyInstaller cache
         "--noconfirm",        # Don't ask for confirmation
@@ -122,7 +121,7 @@ def build_exe():
         cmd.extend(["--icon", str(icon_path)])
     
     print(f"Running: {' '.join(cmd)}")
-    print("This may take a few minutes...")
+    print("This may take 2-5 minutes...")
     
     result = subprocess.run(cmd, capture_output=True, text=True)
     
