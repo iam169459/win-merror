@@ -52,6 +52,13 @@ git clone https://github.com/iam169459/win-merror.git
 cd win-merror
 
 # Install dependencies
+# For Ubuntu/Linux VPS (server only):
+pip install -r requirements-server.txt
+
+# For Windows (client):
+pip install -r requirements-client.txt
+
+# Or for full development (Windows only):
 pip install -r requirements.txt
 ```
 
